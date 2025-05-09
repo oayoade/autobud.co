@@ -20,5 +20,14 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: autobud_db
 
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+    stdin_open: true
+    tty: true
+
 volumes:
   postgres_data:

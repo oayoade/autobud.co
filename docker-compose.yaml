@@ -39,8 +39,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
+      args:
+        - VITE_API_URL=${VITE_API_URL}
     ports:
       - "80:80"
+    env_file:
+      - .env
     networks:
       - monitoring
     depends_on:

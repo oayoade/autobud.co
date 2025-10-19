@@ -9,12 +9,18 @@ import os
 from prometheus_client import Counter, Histogram, generate_latest
 from fastapi.responses import PlainTextResponse
 import time
+import httpx
+import asyncio
+from typing import Optional
 
 # Database setup
 DATABASE_URL = os.getenv("DATABASE_URL")
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+# Webhook configuration
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 # Prometheus metrics
 REQUEST_COUNT = Counter('http_request_total', 'Total HTTP requests', ['method', 'path'])
@@ -71,6 +77,32 @@ def get_db():
 # Create tables
 Base.metadata.create_all(bind=engine)
 
+# Helper function to send webhook
+async def send_webhook(data: dict) -> Optional[dict]:
+    """
+    Send form data to webhook URL as JSON.
+    Returns response data if successful, None if webhook URL not configured or on error.
+    """
+    if not WEBHOOK_URL:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                WEBHOOK_URL,
+                json=data,
+                headers={"Content-Type": "application/json"}
+            )
+            response.raise_for_status()
+            return {"status": "success", "status_code": response.status_code}
+    except httpx.HTTPError as e:
+        # Log error but don't fail the form submission
+        print(f"Webhook error: {str(e)}")
+        return {"status": "error", "error": str(e)}
+    except Exception as e:
+        print(f"Unexpected webhook error: {str(e)}")
+        return {"status": "error", "error": str(e)}
+
 # Middleware for metrics
 @app.middleware("http")
 async def add_prometheus_metrics(request, call_next):
@@ -88,7 +120,7 @@ def read_root():
     return {"message": "AutoBud Contact API is running"}
 
 @app.post("/api/contact", response_model=ContactResponse)
-def submit_contact_form(contact_data: ContactFormData, db: Session = Depends(get_db)):
+async def submit_contact_form(contact_data: ContactFormData, db: Session = Depends(get_db)):
     try:
         # Create new contact submission
         db_contact = ContactSubmission(
@@ -97,11 +129,24 @@ def submit_contact_form(contact_data: ContactFormData, db: Session = Depends(get
             company=contact_data.company,
             message=contact_data.message
         )
-        
+
         db.add(db_contact)
         db.commit()
         db.refresh(db_contact)
-        
+
+        # Prepare webhook payload
+        webhook_payload = {
+            "id": db_contact.id,
+            "name": db_contact.name,
+            "email": db_contact.email,
+            "company": db_contact.company,
+            "message": db_contact.message,
+            "submitted_at": db_contact.submitted_at.isoformat()
+        }
+
+        # Send to webhook asynchronously (non-blocking)
+        await send_webhook(webhook_payload)
+
         return db_contact
     except Exception as e:
         db.rollback()

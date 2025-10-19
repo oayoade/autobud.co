@@ -36,9 +36,9 @@ class ContactSubmission(Base):
     __tablename__ = os.getenv("TABLE_NAME", "contact_submissions")
     
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    email = Column(String, nullable=False)
-    company = Column(String, nullable=True)
+    name = Column(String(255), nullable=False)
+    email = Column(String(255), nullable=False)
+    company = Column(String(255), nullable=True)
     message = Column(Text, nullable=False)
     submitted_at = Column(DateTime, default=datetime.utcnow)
 

@@ -12,6 +12,11 @@ import time
 import httpx
 import asyncio
 from typing import Optional
+from prometheus_fastapi_instrumentator import Instrumentator
+
+#for Prometheus metrics
+app = FastAPI()
+Instrumentator().instrument(app).expose(app)    
 
 # Database setup
 DATABASE_URL = os.getenv("DATABASE_URL")

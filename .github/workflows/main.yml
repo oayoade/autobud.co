@@ -3,7 +3,7 @@ name: deploy to ec2 Docker compose
 on:
  push:
    branches: ["main"]
- workflow_dispatch:
+   workflow_dispatch:
 
  jobs: 
    run-playbooks:
@@ -19,4 +19,8 @@ on:
           eval `ssh-agent -s`
           mkdir -p /home/runner/.ssh/
           touch /home/runner/.ssh/id_rsa
-          echo -e 
+          echo -e "${{secrets.SSH_KEY}}" > /home/runner/.ssh/id_rsa
+          chmod 700 /home/runner/.ssh/id_rsa
+          ssh-keyscan -H autobud.co >> ~/.ssh/known_hosts
+          ssh ubuntu@autobud.co
+

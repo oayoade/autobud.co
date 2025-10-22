@@ -31,7 +31,7 @@ jobs:
 
           # SSH into EC2 and pull + deploy
           ssh -o StrictHostKeyChecking=no ubuntu@autobud.co << 'EOF'
-            cd /path/to/your/project
+            cd autobud.co
             git pull origin main
             docker-compose down
             docker-compose up -d --build

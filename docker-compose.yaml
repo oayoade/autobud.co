@@ -13,7 +13,7 @@ services:
   fastapi-app:
     image: rslim087/fastapi-prometheus:latest
     ports:
-      - "8000:8000"  # Assuming your FastAPI app runs on port 8000
+      - "8000:8000"  # Assuming your FastAPIII app runs on port 8000
     networks:
       - monitoring
 

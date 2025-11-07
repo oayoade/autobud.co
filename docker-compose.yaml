@@ -1,6 +1,29 @@
 version: '3'
 
 services:
+  traefik:
+      image: traefik:v2.10
+      command:
+        - "--entrypoints.web.address=:80"
+        - "--entrypoints.websecure.address=:443"
+        - "--providers.docker=true"
+        - "--api.insecure=false"
+        - "--certificatesresolvers.le.acme.tlschallenge=true"
+        - "--certificatesresolvers.le.acme.email=autobud.co@gmail.com"
+        - "--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json"
+      ports:
+        - "80:80"
+        - "443:443"
+        - "8080:8080"   # Traefik dashboard (optional)
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock:ro
+        - ./letsencrypt:/letsencrypt
+      networks:
+        - monitoring
+
+
+
+
   contact-api:
     build: .
     ports:
@@ -47,6 +70,11 @@ services:
       - "80:80"
     env_file:
       - .env
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`autobud.co`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls.certresolver=le"
     networks:
       - monitoring
     depends_on:

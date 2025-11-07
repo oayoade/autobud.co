@@ -1,103 +1,110 @@
-version: '3'
+version: "3.9"
+
+networks:
+  monitoring:
+
+volumes:
+  traefik_letsencrypt:
 
 services:
   traefik:
-      image: traefik:v2.10
-      command:
-        - "--entrypoints.web.address=:80"
-        - "--entrypoints.websecure.address=:443"
-        - "--providers.docker=true"
-        - "--api.insecure=false"
-        - "--certificatesresolvers.le.acme.tlschallenge=true"
-        - "--certificatesresolvers.le.acme.email=autobud.co@gmail.com"
-        - "--certificatesresolvers.le.acme.storage=/letsencrypt/acme.json"
-      ports:
-        - "80:80"
-        - "443:443"
-        - "8080:8080"   # Traefik dashboard (optional)
-      volumes:
-        - /var/run/docker.sock:/var/run/docker.sock:ro
-        - ./letsencrypt:/letsencrypt
-      networks:
-        - monitoring
-
-
-
-
-  contact-api:
-    build: .
+    image: traefik:v2.11
+    command:
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      # ACME (Let's Encrypt) – HTTP-01 challenge on :80
+      - --certificatesresolvers.le.acme.email=autobud.co@gmail.com
+      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.le.acme.httpchallenge=true
+      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
     ports:
-      - "8001:8000"
-    env_file:
-      - .env
-    networks:
-      - monitoring
-
-  fastapi-app:
-    image: rslim087/fastapi-prometheus:latest
-    ports:
-      - "8000:8000"  # Assuming your FastAPIII app runs on port 8000
-    networks:
-      - monitoring
-
-  prometheus:
-    image: prom/prometheus:v2.37.0
+      - "80:80"
+      - "443:443"
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-    ports:
-      - "9090:9090"
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_letsencrypt:/letsencrypt
     networks:
       - monitoring
+    labels:
+      - traefik.enable=true
+      # global HTTP -> HTTPS redirect
+      - traefik.http.routers.redirect-to-https.rule=HostRegexp(`{any:.+}`)
+      - traefik.http.routers.redirect-to-https.entrypoints=web
+      - traefik.http.routers.redirect-to-https.middlewares=redirect-https
+      - traefik.http.middlewares.redirect-https.redirectscheme.scheme=https
+      - traefik.http.middlewares.redirect-https.redirectscheme.permanent=true
 
-  grafana:
-    image: grafana/grafana:9.0.0
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    ports:
-      - "3000:3000"
-    networks:
-      - monitoring
-
-  
-
+  # ---- Frontend (served by its own Nginx on port 80 inside the container) ----
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.frontend
       args:
         - VITE_API_URL=${VITE_API_URL}
-    
-    env_file:
-      - .env
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.frontend.rule=Host(`autobud.co`)"
-      - "traefik.http.routers.frontend.entrypoints=websecure"
-      - "traefik.http.routers.frontend.tls.certresolver=le"
+    environment:
+      - VITE_API_URL=${VITE_API_URL}
     networks:
       - monitoring
     depends_on:
       - contact-api
-      - fastapi-app
+    labels:
+      - traefik.enable=true
+      # Route all non-/api traffic on autobud.co to frontend
+      - traefik.http.routers.frontend.rule=Host(`autobud.co`) && PathPrefix(`/`)
+      - traefik.http.routers.frontend.entrypoints=websecure
+      - traefik.http.routers.frontend.tls.certresolver=le
+      # Frontend container listens on 80 internally
+      - traefik.http.services.frontend.loadbalancer.server.port=80
 
-  loki:
-    image: grafana/loki:2.9.0
-    ports:
-      - "3100:3100"
-    command: -config.file=/etc/loki/local-config.yaml
+  # ---- Contact API (FastAPI-style app listening on 8000 internally) ----
+  contact-api:
+    build: .
+    env_file:
+      - .env
     networks:
       - monitoring
+    labels:
+      - traefik.enable=true
+      # Route /api... on autobud.co to the API
+      - traefik.http.routers.contactapi.rule=Host(`autobud.co`) && PathPrefix(`/api`)
+      - traefik.http.routers.contactapi.entrypoints=websecure
+      - traefik.http.routers.contactapi.tls.certresolver=le
+      - traefik.http.services.contactapi.loadbalancer.server.port=8000
 
-  promtail:
-    image: grafana/promtail:2.9.0
+  # ---- Prometheus ----
+  prometheus:
+    image: prom/prometheus:v2.37.0
     volumes:
-      - /var/log:/var/log
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - ./promtail-config.yaml:/etc/promtail/config.yaml
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
     networks:
       - monitoring
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.prom.rule=Host(`prometheus.autobud.co`)
+      - traefik.http.routers.prom.entrypoints=websecure
+      - traefik.http.routers.prom.tls.certresolver=le
+      - traefik.http.services.prom.loadbalancer.server.port=9090
 
-networks:
-  monitoring:
+  # ---- Grafana ----
+  grafana:
+    image: grafana/grafana:9.0.0
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    networks:
+      - monitoring
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.grafana.rule=Host(`grafana.autobud.co`)
+      - traefik.http.routers.grafana.entrypoints=websecure
+      - traefik.http.routers.grafana.tls.certresolver=le
+      - traefik.http.services.grafana.loadbalancer.server.port=3000
 
-#pushing
+  # ---- (Optional) Your existing FastAPI demo app instrumented for metrics ----
+  fastapi-app:
+    image: rslim087/fastapi-prometheus:latest
+    networks:
+      - monitoring
+    labels:
+      - traefik.enable=false # not exposed publicly
